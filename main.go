@@ -1,7 +1,10 @@
 package main
 
-import "golang-day23/freeapi"
+import (
+	"golang-day23/restapi"
+)
 
 func main() {
-	freeapi.RandomQuote()
+	// freeapi.RandomQuote()
+	restapi.Handler()
 }
