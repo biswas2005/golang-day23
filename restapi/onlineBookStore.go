@@ -1,11 +1,9 @@
 package restapi
 
 import (
-	"bufio"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -26,66 +24,147 @@ type Book struct {
 }
 
 var books []Book
-var count Book
 
-func fileHandle() (*os.File, error) {
-	file, err := os.OpenFile("BookStore.file", os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
-	if err != nil {
-		return nil, err
-	}
-	return file, nil
-}
-
-func loadStore() {
-	books = nil
-	file, err := os.Open("BookStore.file")
-	if err != nil {
-		fmt.Println("Error Opening File", err)
-		return
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		var b Book
-		err := json.Unmarshal([]byte(line), &b)
-		if err != nil {
-			fmt.Println("Error Unmarshalling", err)
-			return
-		}
-		books = append(books, b)
-	}
-}
-
-func addBook(w http.ResponseWriter, r *http.Request) {
-	loadStore()
+func postBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var book Book
 	err := json.NewDecoder(r.Body).Decode(&book)
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	maxID := 0
+	for _, bs := range books {
+		if bs.ID > maxID {
+			maxID = bs.ID
+		}
+	}
+	book.ID = maxID + 1
+	books = append(books, book)
+	w.WriteHeader(http.StatusCreated)
+
+	err1 := json.NewEncoder(w).Encode(map[string]interface{}{
+		"book":    book,
+		"message": "Book Created Successfully",
+	})
+	if err1 != nil {
+		http.Error(w, `{"error":"Failed to Encode Response"}`, http.StatusInternalServerError)
+	}
+
+}
+
+func getBooks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(books)
+}
+
+func getBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	params := mux.Vars(r)
+	id, err := strconv.Atoi(params["id"])
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid ID Format",
+		})
+		return
+	}
+	for _, book := range books {
+		if book.ID == id {
+			w.WriteHeader(http.StatusOK)
+			err := json.NewEncoder(w).Encode(book)
+			if err != nil {
+				http.Error(w, `{"error":"Failed to Encode"}`, http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode("Could not find ID")
+}
+
+func putBook(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	idx, err1 := strconv.Atoi(params["id"])
+	if err1 != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid ID Format",
+		})
+		return
+	}
+	var updated Book
+
+	err := json.NewDecoder(r.Body).Decode(&updated)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
 		return
 	}
 	exists := false
-	for _, bs := range books {
-		if book.ID == bs.ID {
-			count.ID++
+	for id, book := range books {
+		if book.ID == idx {
+			updated.ID = idx
+			books[id] = updated
 			exists = true
 			break
 		}
 	}
 	if !exists {
-		book.ID = len(books) + 1
-		books = append(books, book)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(book)
+		http.Error(w, `{"error":"Could not find ID"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	errr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"book":    updated,
+		"message": "Updated Successfully",
+	})
+	if errr != nil {
+		http.Error(w, `{"error":"Failed to Encode"}`, http.StatusInternalServerError)
 	}
 }
+
+func deleteBook(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	idx, err := strconv.Atoi(params["id"])
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid ID Format",
+		})
+		return
+	}
+	exists := false
+	for i, val := range books {
+		if val.ID == idx {
+			books = append(books[:i], books[i+1:]...)
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		http.Error(w, `{"error":"ID does not exist"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	err1 := json.NewEncoder(w).Encode(map[string]string{
+		"message": "Deleted successfully",
+	})
+	if err1 != nil {
+		http.Error(w, `{"error":"Failed to Encode"}`, http.StatusInternalServerError)
+	}
+}
+
 func Handler() {
-	fileHandle()
+
 	router := mux.NewRouter()
 
-	router.HandleFunc("/books", addBook).Methods("POST")
+	router.HandleFunc("/books", postBook).Methods("POST")
+	router.HandleFunc("/books", getBooks).Methods("GET")
+	router.HandleFunc("/books/{id}", getBook).Methods("GET")
+	router.HandleFunc("/books/{id}", putBook).Methods("PUT")
+	router.HandleFunc("/books/{id}", deleteBook).Methods("DELETE")
 
 	http.ListenAndServe(":8080", router)
 }
