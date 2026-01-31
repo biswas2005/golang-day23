@@ -8,6 +8,8 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Book represents the data model for our API.
+// It contains nested Author and Orders structs to demonstrate relationships.
 type Book struct {
 	ID     int    `json:"id"`
 	Title  string `json:"title"`
@@ -23,17 +25,21 @@ type Book struct {
 	} `json:"orders"`
 }
 
+// books acts as our in-memory database.
 var books []Book
 
+// postBook() handles POST /books
+// It creates a new book entry and assigns a unique ID.
 func postBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var book Book
+	//Decode JSON request body into Book struct.
 	err := json.NewDecoder(r.Body).Decode(&book)
 	if err != nil {
 		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
 		return
 	}
-
+	//Generate new ID by finding max existing ID
 	maxID := 0
 	for _, bs := range books {
 		if bs.ID > maxID {
@@ -41,9 +47,10 @@ func postBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	book.ID = maxID + 1
+	// Append new book to slice
 	books = append(books, book)
 	w.WriteHeader(http.StatusCreated)
-
+	// Respond with created book and success message
 	err1 := json.NewEncoder(w).Encode(map[string]interface{}{
 		"book":    book,
 		"message": "Book Created Successfully",
@@ -54,14 +61,18 @@ func postBook(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// getBooks() handles GET /books
+// It returns all books in the slice.
 func getBooks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(books)
 }
 
+// getBook() handles GET /books/{id}
+// It returns a single book by ID.
 func getBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
+	// Extract ID from URL params
 	params := mux.Vars(r)
 	id, err := strconv.Atoi(params["id"])
 	if err != nil {
@@ -71,6 +82,7 @@ func getBook(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Search for book by ID
 	for _, book := range books {
 		if book.ID == id {
 			w.WriteHeader(http.StatusOK)
@@ -81,6 +93,7 @@ func getBook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	//If not found
 	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode("Could not find ID")
 }
