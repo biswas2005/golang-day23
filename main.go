@@ -6,5 +6,6 @@ import (
 
 func main() {
 	// freeapi.RandomQuote()
+	restapi.ConnectDB()
 	restapi.Handler()
 }
