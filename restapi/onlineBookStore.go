@@ -10,18 +10,20 @@ import (
 )
 
 type Book struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Author struct {
-		Auid  int    `json:"auid"`
-		AName string `json:"aname"`
-	} `json:"author"`
+	ID     int     `json:"id"`
+	Title  string  `json:"title"`
 	Price  float64 `json:"price"`
-	Orders struct {
-		Oid          int     `json:"oid"`
-		CustomerName string  `json:"customername"`
-		TotalPrice   float64 `json:"totalprice"`
-	} `json:"orders"`
+	Author Author  `json:"author"`
+	Orders Orders  `json:"orders"`
+}
+type Author struct {
+	Auid  int    `json:"auid"`
+	AName string `json:"aname"`
+}
+type Orders struct {
+	Oid          sql.NullInt64   `json:"oid"`
+	CustomerName sql.NullString  `json:"customername"`
+	TotalPrice   sql.NullFloat64 `json:"totalprice"`
 }
 
 func postBook(w http.ResponseWriter, r *http.Request) {
@@ -54,11 +56,11 @@ func postBook(w http.ResponseWriter, r *http.Request) {
 	}
 	bookID, _ := bookRes.LastInsertId()
 
-	_, err0 := db.Exec(
+	_, err = db.Exec(
 		"INSERT INTO orders (book_id, customer_name, total_price) VALUES (?, ?, ?)",
 		bookID, book.Orders.CustomerName, book.Orders.TotalPrice,
 	)
-	if err0 != nil {
+	if err != nil {
 		http.Error(w, `{"error":"order insert failed"}`, http.StatusInternalServerError)
 		return
 	}
@@ -77,7 +79,7 @@ func postBook(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func getBooks(w http.ResponseWriter, r *http.Request) {
+func getAllBooks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	rows, err := db.Query(`
 		SELECT b.id, b.title, b.price,
@@ -97,7 +99,7 @@ func getBooks(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var book Book
-		rows.Scan(
+		if err := rows.Scan(
 			&book.ID,
 			&book.Title,
 			&book.Price,
@@ -106,10 +108,20 @@ func getBooks(w http.ResponseWriter, r *http.Request) {
 			&book.Orders.Oid,
 			&book.Orders.CustomerName,
 			&book.Orders.TotalPrice,
-		)
+		); err != nil {
+			http.Error(w, "Row scan failed:"+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		books = append(books, book)
 	}
-	json.NewEncoder(w).Encode(books)
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Rows iteration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(books); err != nil {
+		http.Error(w, "JSON encode failed:"+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func getBook(w http.ResponseWriter, r *http.Request) {
@@ -118,10 +130,7 @@ func getBook(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	id, err := strconv.Atoi(params["id"])
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Invalid ID Format",
-		})
+		http.Error(w, "Invalid ID Format", http.StatusBadRequest)
 		return
 	}
 
@@ -153,18 +162,19 @@ func getBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(book)
+	if err := json.NewEncoder(w).Encode(book); err != nil {
+		http.Error(w, "JSON encode failed", http.StatusInternalServerError)
+		return
+	}
 }
 
 func putBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 
 	id, err1 := strconv.Atoi(params["id"])
 	if err1 != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Invalid ID Format",
-		})
+		http.Error(w, "Invalid ID Format", http.StatusBadRequest)
 		return
 	}
 	var updated Book
@@ -192,14 +202,15 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 
 	id, err := strconv.Atoi(params["id"])
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Invalid ID Format",
-		})
+		http.Error(w, "Invalid ID Format", http.StatusBadRequest)
 		return
 	}
 
 	_, err = db.Exec("DELETE FROM orders WHERE book_id=?", id)
+	if err != nil {
+		http.Error(w, "Delete failed.", http.StatusInternalServerError)
+		return
+	}
 	_, err = db.Exec("DELETE FROM books WHERE id=?", id)
 	if err != nil {
 		http.Error(w, "Delete failed.", http.StatusInternalServerError)
@@ -215,7 +226,7 @@ func Handler() {
 	router := mux.NewRouter()
 
 	router.HandleFunc("/books", postBook).Methods("POST")
-	router.HandleFunc("/books", getBooks).Methods("GET")
+	router.HandleFunc("/books", getAllBooks).Methods("GET")
 	router.HandleFunc("/books/{id}", getBook).Methods("GET")
 	router.HandleFunc("/books/{id}", putBook).Methods("PUT")
 	router.HandleFunc("/books/{id}", deleteBook).Methods("DELETE")
